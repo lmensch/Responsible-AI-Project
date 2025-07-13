@@ -1,0 +1,8 @@
+transformers
+pandas
+accelerate
+torch
+pyarrow
+fastparquet
+kaggle
+tqdm
