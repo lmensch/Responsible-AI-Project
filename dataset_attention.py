@@ -261,8 +261,8 @@ iterations = 100
 pbar = tqdm.tqdm(total=iterations)
 start = time.time()
 for idx in range(2):
-    question = test_ds['question'][idx]
-    answer = test_ds['answer'][idx]
+    question = train_ds['question'][idx]
+    answer = train_ds['answer'][idx]
     answer_int = answer.split('####')[1]
     # Remove thounsands divider
     if ',' in answer_int:
