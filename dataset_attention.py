@@ -269,7 +269,7 @@ for idx in range(2):
         answer_int = ''.join(digit for digit in answer_int.split(','))
     answer_int = int(answer_int)
     counterfactual_int = int(train_ds['revised_result'][idx])
-    result, reason, attention_problem, token_problem, attention_revise, token_revise, attention_revised_problem, token_revised_problem = check_counterfactual(problem, answer_int, counterfactual_int, prompt_idx)
+    result, reason, attention_problem, token_problem, attention_revise, token_revise, attention_revised_problem, token_revised_problem = check_counterfactual(question, answer_int, counterfactual_int, prompt_idx)
     prompts.append(prompt_idx)
     ds_idx.append(idx)
     results.append(result)
