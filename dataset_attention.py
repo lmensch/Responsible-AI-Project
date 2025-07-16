@@ -395,8 +395,8 @@ feature_rows = []
 start_idx = int(100)
 end_idx = int(400)  #len(train_ds)
 total = int(end_idx-start_idx)
-pbar = tqdm.tqdm(total=total)
 print(f"Benchmark: {start_idx} - {end_idx}")
+pbar = tqdm.tqdm(total=total)
 start = time.time()
 for idx in range(start_idx, end_idx):
     question = train_ds['question'][idx]
