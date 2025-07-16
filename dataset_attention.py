@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import tqdm
+from scipy.stats import entropy
 
 set_seed(42)
 
@@ -21,6 +22,51 @@ model = AutoModelForCausalLM.from_pretrained(
     device_map="auto",   # Automatically maps the model to available devices (e.g., GPU)
     attn_implementation="eager"  # ← THIS IS REQUIRED
 )
+
+def chat(user_prompt, max_tokens=2200, temperature=0.2):
+    """
+    Interacts with the Qwen model, incorporating a system prompt for mathematical,
+    short, and precise answers.
+
+    Args:
+        user_prompt (str): The user's input query.
+        max_tokens (int): The maximum number of new tokens to generate for the response.
+                          Reduced for "short and precise" answers.
+        temperature (float): Controls the randomness of the generation. Lower values
+                             make the output more deterministic.
+
+    Returns:
+        str: The model's generated response.
+    """
+    #system_prompt = "You are a highly logical and precise mathematical assistant. When asked a question, analyze it rigorously, break it down into its mathematical components, and provide the shortest, most accurate answer possible. Focus on direct calculations, definitions, or theorems without unnecessary elaboration."
+    system_prompt = "You are a highly logical and precise mathematical assistant. When asked a question, provide the shortest, most accurate answer possible. Focus on direct calculations, definitions, or theorems without unnecessary elaboration."
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
+
+    # Apply the chat template to format the messages into a single prompt string
+    # add_generation_prompt=True is crucial for chat models like Qwen to start generating
+    formatted_prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+    inputs = tokenizer(formatted_prompt, return_tensors="pt").to(model.device)
+
+    # Generate the response
+    output_ids = model.generate(
+        **inputs,
+        max_new_tokens=max_tokens,
+        temperature=temperature,
+        do_sample=True,
+        top_p=0.95,
+        pad_token_id=tokenizer.eos_token_id,
+        # It's often good practice to set eos_token_id in generate for better termination
+        eos_token_id=tokenizer.eos_token_id
+    )
+
+    # Decode the generated output, skipping the input part of the prompt
+    response = tokenizer.decode(output_ids[0][inputs['input_ids'].shape[-1]:], skip_special_tokens=True)
+    return response.strip()
 
 def chat_with_attention(user_prompt, max_tokens=2200, temperature=0.2):
     """
@@ -140,7 +186,7 @@ def check_counterfactual(problem, correct_answer, revised_answer, prompt_idx):
   log("+------------- Inital Problem -------------+")
   log(problem_prompt)
   log("+---------------- Response ----------------+")
-  problem_response, attention_problem, token_problem = chat_with_attention(problem_prompt)
+  problem_response = chat(problem_prompt)
   initial_answer = extract_result(problem_response)
   log(initial_answer)
   if initial_answer is not None and initial_answer == correct_answer:
@@ -154,7 +200,7 @@ def check_counterfactual(problem, correct_answer, revised_answer, prompt_idx):
     revised_problem_prompt = get_calc_prompt(revised_problem, prompt_idx)
     log(f"Revised Problem Prompt: {revised_problem_prompt}")
     log("+------------ Revised Answer --------------+")
-    revised_problem_answer, attention_revised_problem, token_revised_problem = chat_with_attention(revised_problem_prompt)
+    revised_problem_answer = chat(revised_problem_prompt)
     extracted_revised_answer = extract_result(revised_problem_answer)
     if extracted_revised_answer is not None and extracted_revised_answer == revised_answer:
       log(f"Revised answer: {extracted_revised_answer}")
@@ -169,7 +215,7 @@ def check_counterfactual(problem, correct_answer, revised_answer, prompt_idx):
     log(f"Initial answer: {initial_answer}")
     log("❌ Wrong answer (original problem)")
     return False, 'WRONG INTIAL ANSWER', attention_problem, token_problem, attention_revise, token_revise, attention_revised_problem, token_revised_problem
-  return False, 'UNKNOWN', attention_problem, token_problem, attention_revise, token_revise, attention_revised_problem, token_revised_problem
+  return False, 'UNKNOWN', attention_revise, token_revise
 
 def plot_attention(attention, tokens, layer=0, head=0, max_tokens=50):
     #matrix = attention[layer][head].detach().to(torch.float32).cpu().numpy()
@@ -245,18 +291,97 @@ def plot_attention_math_only(attention, tokens, layer=0, head=0):
     plt.tight_layout()
     plt.show()
 
+def is_math_token(token):
+    """Basic filter for math-related tokens."""
+    math_keywords = {'+', '-', '*', '/', '=', '^', '%', 'plus', 'minus', 'divided', 'times', 'equals', 'equal'}
+    return bool(re.match(r'^-?\d+(\.\d+)?$', token)) or token in math_keywords
+
+def extract_features(attention, tokens):
+    """
+    Extracts interpretable attention-based and token-based features from a single example.
+
+    Args:
+        attention (list of torch.Tensor): List of attention maps per layer (shape: [heads, seq_len, seq_len])
+        tokens (list of str): List of input tokens
+
+    Returns:
+        dict: Feature dictionary
+    """
+    features = {}
+    num_tokens = len(tokens)
+    math_token_indices = [i for i, tok in enumerate(tokens) if is_math_token(tok)]
+
+    # --- Token-based features ---
+    features["sequence_length"] = num_tokens
+    features["num_numerical_tokens"] = sum(re.match(r'^\d+(\.\d+)?$', tok) is not None for tok in tokens)
+    features["num_math_tokens"] = len(math_token_indices)
+    features["math_token_ratio"] = len(math_token_indices) / num_tokens if num_tokens > 0 else 0
+    features["has_equals_sign"] = "=" in tokens or "equals" in tokens
+
+    # Select layer 0 and last layer for summaries
+    attn_layer_0 = attention[0]             # shape: [heads, N, N]
+    attn_layer_last = attention[-1]
+
+    def mean_attention_to(indices, attn_layer):
+        if len(indices) == 0:
+            return 0.0
+        # Sum attention to math tokens across all heads and from all tokens
+        total = sum(attn[:, :, indices].sum().item() for attn in [attn_layer])
+        return total / (attn_layer.shape[0] * attn_layer.shape[1] * len(indices))
+
+    def mean_attention_from(indices, attn_layer):
+        if len(indices) == 0:
+            return 0.0
+        total = sum(attn[:, indices, :].sum().item() for attn in [attn_layer])
+        return total / (attn_layer.shape[0] * len(indices) * attn_layer.shape[2])
+
+    # --- Attention features (layer 0 and last layer) ---
+    features["mean_attention_to_math_tokens_0"] = mean_attention_to(math_token_indices, attn_layer_0)
+    features["mean_attention_to_math_tokens_last"] = mean_attention_to(math_token_indices, attn_layer_last)
+
+    features["mean_attention_from_math_tokens_0"] = mean_attention_from(math_token_indices, attn_layer_0)
+    features["mean_attention_from_math_tokens_last"] = mean_attention_from(math_token_indices, attn_layer_last)
+
+    # Final token attention (how much is attended to)
+    final_token_index = num_tokens - 1
+    final_token_attn_received = attn_layer_last[:, :, final_token_index].mean().item()
+    features["final_token_attention_received"] = final_token_attn_received
+
+    # Max attention from any math token
+    if math_token_indices:
+        max_attn_from_math = attn_layer_last[:, math_token_indices, :].max().item()
+    else:
+        max_attn_from_math = 0.0
+    features["max_attention_from_math_token"] = max_attn_from_math
+
+    # Self-attention (diagonal values)
+    diag_mask = torch.eye(num_tokens).bool().to(attn_layer_0.device)
+    self_attention_vals = attn_layer_0[:, diag_mask].view(attn_layer_0.shape[0], -1)  # shape: [heads, N]
+    features["self_attention_ratio"] = self_attention_vals.mean().item()
+
+    # Attention entropy (layer 0, per token)
+    entropies = []
+    for head in attn_layer_0:
+        for row in head:
+            p = row.detach().cpu().numpy()
+            entropies.append(entropy(p + 1e-8))  # add small value to avoid log(0)
+    features["attention_entropy_layer0"] = float(np.mean(entropies))
+
+    # Head 0: max attended token is math?
+    head0_attn = attn_layer_0[0]  # shape: [N, N]
+    max_targets = torch.argmax(head0_attn, dim=1).tolist()
+    max_target_is_math = any(idx in math_token_indices for idx in max_targets)
+    features["head0_max_attention_target_is_math"] = max_target_is_math
+
+    return features
+
 train_ds = pd.read_csv('gsm8k_extended_train.csv')
 prompt_idx = 0
 prompts = []
 ds_idx = []
 results = []
 reasons = []
-attentions_problem = []
-tokens_problem = []
-attentions_revise = []
-tokens_revise = []
-attentions_revised_problem = []
-tokens_revised_problem = []
+feature_rows = []
 start_idx = int(0)
 end_idx = int(100)  #len(train_ds)
 total = int(end_idx-start_idx)
@@ -275,17 +400,13 @@ for idx in range(start_idx, end_idx):
     if ',' in counterfactual_int:
         counterfactual_int = ''.join(digit for digit in counterfactual_int.split(','))
     counterfactual_int = int(float(counterfactual_int))
-    result, reason, attention_problem, token_problem, attention_revise, token_revise, attention_revised_problem, token_revised_problem = check_counterfactual(question, answer_int, counterfactual_int, prompt_idx)
+    result, reason, attention_revise, token_revise = check_counterfactual(question, answer_int, counterfactual_int, prompt_idx)
+    features = extract_features(attention_revise, token_revise)
+    feature_rows.append(features)
     prompts.append(prompt_idx)
     ds_idx.append(idx)
     results.append(result)
     reasons.append(reason)
-    attentions_problem.append(attention_problem)
-    tokens_problem.append(token_problem)
-    attentions_revise.append(attention_revise)
-    tokens_revise.append(token_revise)
-    attentions_revised_problem.append(attention_revised_problem)
-    tokens_revised_problem.append(token_revised_problem)
     # if reason == 'WRONG INTIAL ANSWER':
     #     # retry
     #     result, reason = check_counterfactual(question, answer_int, answer_int, prompt_idx)
@@ -302,14 +423,10 @@ data = {'Datapoint': ds_idx,
         'Prompt_Idx': prompts,
         'Result': results,
         'Reason': reasons,
-        'Attention_Problem': attentions_problem,
-        'Tokens_Problem': tokens_problem,
-        'Attention_Revise': attentions_revise,
-        'Tokens_Revise': tokens_revise,
-        'Attention_Revised_Problem': attentions_revised_problem,
-        'Tokens_Revised_Problem': tokens_revised_problem
         }
 
 df = pd.DataFrame(data)
-df.to_csv(f'prompt_{prompt_idx}_attention.csv')
-print(f"Saved prompt_{prompt_idx}_attention.csv")
+features_df = pd.DataFrame(feature_rows)
+df = pd.concat([df, features_df], axis=1)
+df.to_csv(f'prompt_{prompt_idx}_features.csv')
+print(f"Saved prompt_{prompt_idx}_features.csv")
