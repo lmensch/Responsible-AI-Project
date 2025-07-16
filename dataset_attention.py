@@ -363,8 +363,8 @@ def extract_features(attention, tokens):
     # Attention entropy (layer 0, per token)
     entropies = []
     for head in attn_layer_0:
-        for row in head:
-            p = row.detach().cpu().numpy()
+        for row in attention[layer][head]:
+            p = row.detach().cpu().to(torch.float32).numpy()
             entropies.append(entropy(p + 1e-8))  # add small value to avoid log(0)
     features["attention_entropy_layer0"] = float(np.mean(entropies))
 
