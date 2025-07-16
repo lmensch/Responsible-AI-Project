@@ -393,7 +393,7 @@ results = []
 reasons = []
 feature_rows = []
 start_idx = int(100)
-end_idx = int(400)  #len(train_ds)
+end_idx = int(200)  #len(train_ds)
 total = int(end_idx-start_idx)
 print(f"Benchmark: {start_idx} - {end_idx}")
 pbar = tqdm.tqdm(total=total)
@@ -455,5 +455,5 @@ data = {'Datapoint': ds_idx,
 df = pd.DataFrame(data)
 features_df = pd.DataFrame(feature_rows)
 df = pd.concat([df, features_df], axis=1)
-df.to_csv(f'prompt_{prompt_idx}_features.csv')
-print(f"Saved prompt_{prompt_idx}_features.csv")
+df.to_csv(f'prompt_{start_idx}_{end_idx}_features.csv')
+print(f'prompt_{start_idx}_{end_idx}_features.csv')
