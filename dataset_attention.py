@@ -205,16 +205,16 @@ def check_counterfactual(problem, correct_answer, revised_answer, prompt_idx):
     if extracted_revised_answer is not None and extracted_revised_answer == revised_answer:
       log(f"Revised answer: {extracted_revised_answer}")
       log("✅ Correct answer (revised & original problem)")
-      return True, 'CORRECT ANSWER', attention_problem, token_problem, attention_revise, token_revise, attention_revised_problem, token_revised_problem
+      return True, 'CORRECT ANSWER', attention_revise, token_revise
     else:
       log(f"Revised answer: {extracted_revised_answer}")
       log("❌ Wrong answer (revised problem)")
-      return False, 'WRONG REVISED ANSWER', attention_problem, token_problem, attention_revise, token_revise, attention_revised_problem, token_revised_problem
+      return False, 'WRONG REVISED ANSWER', attention_revise, token_revise
   else:
     log(f"Response: {problem_response}")
     log(f"Initial answer: {initial_answer}")
     log("❌ Wrong answer (original problem)")
-    return False, 'WRONG INTIAL ANSWER', attention_problem, token_problem, attention_revise, token_revise, attention_revised_problem, token_revised_problem
+    return False, 'WRONG INTIAL ANSWER', attention_revise, token_revise
   return False, 'UNKNOWN', attention_revise, token_revise
 
 def plot_attention(attention, tokens, layer=0, head=0, max_tokens=50):
