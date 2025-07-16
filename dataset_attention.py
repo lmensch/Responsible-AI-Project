@@ -384,16 +384,17 @@ def extract_features(attention, tokens):
     features["head0_max_attention_target_is_math"] = max_target_is_math
 
     return features
-
-train_ds = pd.read_csv('gsm8k_extended_train.csv')
+filename = 'gsm8k_extended_test.csv'
+print(f'Dataset: {filename}')
+train_ds = pd.read_csv(filename)
 prompt_idx = 0
 prompts = []
 ds_idx = []
 results = []
 reasons = []
 feature_rows = []
-start_idx = int(100)
-end_idx = int(200)  #len(train_ds)
+start_idx = int(0)
+end_idx = int(100)  #len(train_ds)
 total = int(end_idx-start_idx)
 print(f"Benchmark: {start_idx} - {end_idx}")
 pbar = tqdm.tqdm(total=total)
@@ -455,5 +456,5 @@ data = {'Datapoint': ds_idx,
 df = pd.DataFrame(data)
 features_df = pd.DataFrame(feature_rows)
 df = pd.concat([df, features_df], axis=1)
-df.to_csv(f'prompt_{start_idx}_{end_idx}_features.csv')
-print(f'prompt_{start_idx}_{end_idx}_features.csv')
+df.to_csv(f'prompt_test_{start_idx}_{end_idx}_features.csv')
+print(f'prompt_test_{start_idx}_{end_idx}_features.csv')
