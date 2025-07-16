@@ -402,12 +402,12 @@ start = time.time()
 for idx in range(start_idx, end_idx):
     question = train_ds['question'][idx]
     answer = train_ds['answer'][idx]
-    answer_int = answer.split('####')[1]
+    answer_int = str(answer.split('####')[1])
     # Remove thounsands divider
     if ',' in answer_int:
         answer_int = ''.join(digit for digit in answer_int.split(','))
     answer_int = int(answer_int)
-    counterfactual_int = train_ds['revised_result'][idx]
+    counterfactual_int = str(train_ds['revised_result'][idx])
     if ',' in counterfactual_int:
         counterfactual_int = ''.join(digit for digit in counterfactual_int.split(','))
     counterfactual_int = int(float(counterfactual_int))
