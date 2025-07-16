@@ -360,13 +360,19 @@ def extract_features(attention, tokens):
     self_attention_vals = attn_layer_0[:, diag_mask].view(attn_layer_0.shape[0], -1)  # shape: [heads, N]
     features["self_attention_ratio"] = self_attention_vals.mean().item()
 
-    # Attention entropy (layer 0, per token)
+    # Attention entropy (layer 0, per token) – for math tokens only
+    math_indices = [i for i, token in enumerate(tokens) if is_math_token(token)]
     entropies = []
-    for head in attn_layer_0:
-        for row in attention[layer][head]:
-            p = row.detach().cpu().to(torch.float32).numpy()
-            entropies.append(entropy(p + 1e-8))  # add small value to avoid log(0)
-    features["attention_entropy_layer0"] = float(np.mean(entropies))
+
+    if math_indices:
+        for head in attn_layer_0:
+            for row in head:
+                row_np = row.detach().cpu().to(torch.float32).numpy()
+                math_probs = row_np[math_indices]  # only get attention on math token positions
+                entropies.extend(entropy(math_probs + 1e-8, axis=1))  # axis=1: over seq_len
+        features["attention_entropy_layer0_math"] = float(np.mean(entropies))
+    else:
+        features["attention_entropy_layer0_math"] = float("nan")
 
     # Head 0: max attended token is math?
     head0_attn = attn_layer_0[0]  # shape: [N, N]
@@ -417,7 +423,7 @@ for idx in range(start_idx, end_idx):
                      "final_token_attention_received": 0,
                      "max_attention_from_math_token": 0,
                      "self_attention_ratio": 0,
-                     "attention_entropy_layer0": 0,
+                     "attention_entropy_layer0_math": 0,
                      "head0_max_attention_target_is_math": False,
                      }
     feature_rows.append(features)
