@@ -365,11 +365,14 @@ def extract_features(attention, tokens):
     entropies = []
 
     if math_indices:
-        for head in attn_layer_0:
-            for row in head:
+        for head in attn_layer_0:  # shape: (num_heads, seq_len, seq_len)
+            for row in head:  # shape: (seq_len,)
                 row_np = row.detach().cpu().to(torch.float32).numpy()
-                math_probs = row_np[math_indices]  # only get attention on math token positions
-                entropies.extend(entropy(math_probs + 1e-8, axis=1))  # axis=1: over seq_len
+                # Select attention distribution over math tokens only
+                selected = row_np[math_indices]
+                # Normalize to ensure it’s a valid distribution
+                selected /= selected.sum() + 1e-8
+                entropies.append(entropy(selected + 1e-8))  # 1D case
         features["attention_entropy_layer0_math"] = float(np.mean(entropies))
     else:
         features["attention_entropy_layer0_math"] = float("nan")
