@@ -9,3 +9,4 @@ tqdm
 seaborn
 numpy
 scipy
+scikit-learn
