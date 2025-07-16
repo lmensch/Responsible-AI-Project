@@ -1,3 +1,4 @@
+from sympy import false
 from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
 import re
 import pandas as pd
@@ -401,7 +402,24 @@ for idx in range(start_idx, end_idx):
         counterfactual_int = ''.join(digit for digit in counterfactual_int.split(','))
     counterfactual_int = int(float(counterfactual_int))
     result, reason, attention_revise, token_revise = check_counterfactual(question, answer_int, counterfactual_int, prompt_idx)
-    features = extract_features(attention_revise, token_revise)
+    if attention_revise and token_revise:
+        features = extract_features(attention_revise, token_revise)
+    else:
+        features = { "sequence_length": 0,
+                     "num_numerical_tokens": 0,
+                     "num_math_tokens": 0,
+                     "math_token_ratio": 0,
+                     "has_equals_sign": False,
+                     "mean_attention_to_math_tokens_0": 0,
+                     "mean_attention_to_math_tokens_last": 0,
+                     "mean_attention_from_math_tokens_0": 0,
+                     "mean_attention_from_math_tokens_last": 0,
+                     "final_token_attention_received": 0,
+                     "max_attention_from_math_token": 0,
+                     "self_attention_ratio": 0,
+                     "attention_entropy_layer0": 0,
+                     "head0_max_attention_target_is_math": False,
+                     }
     feature_rows.append(features)
     prompts.append(prompt_idx)
     ds_idx.append(idx)
