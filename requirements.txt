@@ -10,3 +10,4 @@ seaborn
 numpy
 scipy
 scikit-learn
+shap
