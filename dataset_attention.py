@@ -15,30 +15,15 @@ set_seed(42)
 
 model_name = "Qwen/Qwen3-4B"
 
-# load the tokenizer and the model
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
-    torch_dtype="auto", # Uses the appropriate dtype for your hardware (e.g., bfloat16, float16, float32)
-    device_map="auto",   # Automatically maps the model to available devices (e.g., GPU)
-    attn_implementation="eager"  # ← THIS IS REQUIRED
+    torch_dtype="auto",
+    device_map="auto",
+    attn_implementation="eager"  # required for attention tracking
 )
 
 def chat(user_prompt, max_tokens=2200, temperature=0.2):
-    """
-    Interacts with the Qwen model, incorporating a system prompt for mathematical,
-    short, and precise answers.
-
-    Args:
-        user_prompt (str): The user's input query.
-        max_tokens (int): The maximum number of new tokens to generate for the response.
-                          Reduced for "short and precise" answers.
-        temperature (float): Controls the randomness of the generation. Lower values
-                             make the output more deterministic.
-
-    Returns:
-        str: The model's generated response.
-    """
     #system_prompt = "You are a highly logical and precise mathematical assistant. When asked a question, analyze it rigorously, break it down into its mathematical components, and provide the shortest, most accurate answer possible. Focus on direct calculations, definitions, or theorems without unnecessary elaboration."
     system_prompt = "You are a highly logical and precise mathematical assistant. When asked a question, provide the shortest, most accurate answer possible. Focus on direct calculations, definitions, or theorems without unnecessary elaboration."
 
@@ -47,13 +32,10 @@ def chat(user_prompt, max_tokens=2200, temperature=0.2):
         {"role": "user", "content": user_prompt}
     ]
 
-    # Apply the chat template to format the messages into a single prompt string
-    # add_generation_prompt=True is crucial for chat models like Qwen to start generating
     formatted_prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
     inputs = tokenizer(formatted_prompt, return_tensors="pt").to(model.device)
 
-    # Generate the response
     output_ids = model.generate(
         **inputs,
         max_new_tokens=max_tokens,
@@ -61,33 +43,14 @@ def chat(user_prompt, max_tokens=2200, temperature=0.2):
         do_sample=True,
         top_p=0.95,
         pad_token_id=tokenizer.eos_token_id,
-        # It's often good practice to set eos_token_id in generate for better termination
         eos_token_id=tokenizer.eos_token_id
     )
 
-    # Decode the generated output, skipping the input part of the prompt
+    # skip input part of the prompt
     response = tokenizer.decode(output_ids[0][inputs['input_ids'].shape[-1]:], skip_special_tokens=True)
     return response.strip()
 
 def chat_with_attention(user_prompt, max_tokens=2200, temperature=0.2):
-    """
-    Interacts with the Qwen model and returns both the response and attention weights
-    over the input prompt (not during generation).
-
-    Args:
-        user_prompt (str): The user's input query.
-        max_tokens (int): Maximum number of new tokens to generate.
-        temperature (float): Sampling temperature.
-
-    Returns:
-        Tuple[str, List[Tensor], List[str]]:
-            - response: The generated text.
-            - attentions: List of attention tensors (1 per layer).
-                          Each tensor has shape (num_heads, seq_len, seq_len).
-            - tokens: List of input tokens corresponding to the attention matrices.
-    """
-    import torch
-
     system_prompt = "You are a highly logical and precise mathematical assistant. When asked a question, provide the shortest, most accurate answer possible. Focus on direct calculations, definitions, or theorems without unnecessary elaboration."
 
     messages = [
@@ -96,23 +59,19 @@ def chat_with_attention(user_prompt, max_tokens=2200, temperature=0.2):
     ]
 
     formatted_prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-
-    # Tokenize input
     inputs = tokenizer(formatted_prompt, return_tensors="pt").to(model.device)
 
-    # Get attention weights on the input prompt
     with torch.no_grad():
         outputs = model(**inputs, output_attentions=True)
 
-    # Extract attention weights (list of tensors, one per layer)
-    # Each has shape: (batch_size=1, num_heads, seq_len, seq_len)
+    # extract attention weights --> list of tensors --> one per layer
+    # shape: (batch_size=1, num_heads, seq_len, seq_len)
     attentions = [layer_attn[0] for layer_attn in outputs.attentions]  # remove batch dim
 
-    # Decode input tokens for labeling
+    # decode input tokens --> labeling
     input_ids = inputs['input_ids'][0]
     tokens = tokenizer.convert_ids_to_tokens(input_ids)
 
-    # Now generate the response (without attention tracking)
     output_ids = model.generate(
         **inputs,
         max_new_tokens=max_tokens,
@@ -221,13 +180,13 @@ def check_counterfactual(problem, correct_answer, revised_answer, prompt_idx):
 def plot_attention(attention, tokens, layer=0, head=0, max_tokens=50):
     #matrix = attention[layer][head].detach().to(torch.float32).cpu().numpy()
 
-    # Average over all heads (shape: [num_heads, seq_len, seq_len] → [seq_len, seq_len])
+    # avg over all heads
     matrix = attention[layer].detach().to(torch.float32).mean(dim=0).cpu().numpy()
 
     import seaborn as sns
     import matplotlib.pyplot as plt
 
-    # Trim to first `max_tokens`
+    # first max_tokens
     matrix = matrix[:max_tokens, :max_tokens]
     trimmed_tokens = tokens[:max_tokens]
 
@@ -243,16 +202,6 @@ def clean_tokens(tokens):
     return [t if not t.startswith("<|") else "␣" for t in tokens]
 
 def filter_math_tokens(tokens):
-    """
-    Returns indices and tokens that appear mathematically relevant.
-
-    Args:
-        tokens (List[str]): List of tokens from the tokenizer.
-
-    Returns:
-        List[int]: Indices of math-relevant tokens.
-        List[str]: Corresponding tokens.
-    """
     math_keywords = {
         "+", "-", "*", "/", "^", "=", "<", ">", "≤", "≥",
         "divided", "times", "integral", "derivative", "log", "ln",
@@ -266,7 +215,6 @@ def filter_math_tokens(tokens):
     for i, tok in enumerate(tokens):
         tok_clean = tok.lower().strip()
 
-        # Match numbers or math-like patterns
         is_number = re.fullmatch(r"\d+(\.\d+)?", tok_clean) is not None
         is_operator = tok_clean in math_keywords
         is_math_word = any(kw in tok_clean for kw in math_keywords)
@@ -281,8 +229,6 @@ def plot_attention_math_only(attention, tokens, layer=0, head=0):
     indices, math_tokens = filter_math_tokens(tokens)
 
     matrix = attention[layer][head].detach().to(torch.float32).cpu().numpy()
-
-    # Slice matrix to math-only tokens
     matrix = matrix[indices][:, indices]
 
     plt.figure(figsize=(14, 10))
@@ -298,35 +244,25 @@ def is_math_token(token):
     return bool(re.match(r'^-?\d+(\.\d+)?$', token)) or token in math_keywords
 
 def extract_features(attention, tokens):
-    """
-    Extracts interpretable attention-based and token-based features from a single example.
-
-    Args:
-        attention (list of torch.Tensor): List of attention maps per layer (shape: [heads, seq_len, seq_len])
-        tokens (list of str): List of input tokens
-
-    Returns:
-        dict: Feature dictionary
-    """
     features = {}
     num_tokens = len(tokens)
     math_token_indices = [i for i, tok in enumerate(tokens) if is_math_token(tok)]
 
-    # --- Token-based features ---
+    # numerical (normal) tokens
     features["sequence_length"] = num_tokens
     features["num_numerical_tokens"] = sum(re.match(r'^\d+(\.\d+)?$', tok) is not None for tok in tokens)
     features["num_math_tokens"] = len(math_token_indices)
     features["math_token_ratio"] = len(math_token_indices) / num_tokens if num_tokens > 0 else 0
     features["has_equals_sign"] = "=" in tokens or "equals" in tokens
 
-    # Select layer 0 and last layer for summaries
+    # layer 0 and last layer
     attn_layer_0 = attention[0]             # shape: [heads, N, N]
     attn_layer_last = attention[-1]
 
     def mean_attention_to(indices, attn_layer):
         if len(indices) == 0:
             return 0.0
-        # Sum attention to math tokens across all heads and from all tokens
+        # Sum attention --> math tokens (across all heads & from all tokens)
         total = sum(attn[:, :, indices].sum().item() for attn in [attn_layer])
         return total / (attn_layer.shape[0] * attn_layer.shape[1] * len(indices))
 
@@ -336,48 +272,46 @@ def extract_features(attention, tokens):
         total = sum(attn[:, indices, :].sum().item() for attn in [attn_layer])
         return total / (attn_layer.shape[0] * len(indices) * attn_layer.shape[2])
 
-    # --- Attention features (layer 0 and last layer) ---
+    # attention features
     features["mean_attention_to_math_tokens_0"] = mean_attention_to(math_token_indices, attn_layer_0)
     features["mean_attention_to_math_tokens_last"] = mean_attention_to(math_token_indices, attn_layer_last)
 
     features["mean_attention_from_math_tokens_0"] = mean_attention_from(math_token_indices, attn_layer_0)
     features["mean_attention_from_math_tokens_last"] = mean_attention_from(math_token_indices, attn_layer_last)
 
-    # Final token attention (how much is attended to)
+    # final token attention --> confidence
     final_token_index = num_tokens - 1
     final_token_attn_received = attn_layer_last[:, :, final_token_index].mean().item()
     features["final_token_attention_received"] = final_token_attn_received
 
-    # Max attention from any math token
+    # max attention from any math token
     if math_token_indices:
         max_attn_from_math = attn_layer_last[:, math_token_indices, :].max().item()
     else:
         max_attn_from_math = 0.0
     features["max_attention_from_math_token"] = max_attn_from_math
 
-    # Self-attention (diagonal values)
+    # self-attention
     diag_mask = torch.eye(num_tokens).bool().to(attn_layer_0.device)
     self_attention_vals = attn_layer_0[:, diag_mask].view(attn_layer_0.shape[0], -1)  # shape: [heads, N]
     features["self_attention_ratio"] = self_attention_vals.mean().item()
 
-    # Attention entropy (layer 0, per token) – for math tokens only
+    # attention entropy (layer 0, per token) – for math tokens only
     math_indices = [i for i, token in enumerate(tokens) if is_math_token(token)]
     entropies = []
 
     if math_indices:
-        for head in attn_layer_0:  # shape: (num_heads, seq_len, seq_len)
-            for row in head:  # shape: (seq_len,)
+        for head in attn_layer_0:  # (num_heads, seq_len, seq_len)
+            for row in head:  #  (seq_len,)
                 row_np = row.detach().cpu().to(torch.float32).numpy()
-                # Select attention distribution over math tokens only
                 selected = row_np[math_indices]
-                # Normalize to ensure it’s a valid distribution
+                # normalize --> distribution
                 selected /= selected.sum() + 1e-8
                 entropies.append(entropy(selected + 1e-8))  # 1D case
         features["attention_entropy_layer0_math"] = float(np.mean(entropies))
     else:
         features["attention_entropy_layer0_math"] = float("nan")
 
-    # Head 0: max attended token is math?
     head0_attn = attn_layer_0[0]  # shape: [N, N]
     max_targets = torch.argmax(head0_attn, dim=1).tolist()
     max_target_is_math = any(idx in math_token_indices for idx in max_targets)

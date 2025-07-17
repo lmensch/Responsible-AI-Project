@@ -17,20 +17,6 @@ model = AutoModelForCausalLM.from_pretrained(
 )
 
 def chat(user_prompt, max_tokens=2200, temperature=0.2):
-    """
-    Interacts with the Qwen model, incorporating a system prompt for mathematical,
-    short, and precise answers.
-
-    Args:
-        user_prompt (str): The user's input query.
-        max_tokens (int): The maximum number of new tokens to generate for the response.
-                          Reduced for "short and precise" answers.
-        temperature (float): Controls the randomness of the generation. Lower values
-                             make the output more deterministic.
-
-    Returns:
-        str: The model's generated response.
-    """
     #system_prompt = "You are a highly logical and precise mathematical assistant. When asked a question, analyze it rigorously, break it down into its mathematical components, and provide the shortest, most accurate answer possible. Focus on direct calculations, definitions, or theorems without unnecessary elaboration."
     system_prompt = "You are a highly logical and precise mathematical assistant. When asked a question, provide the shortest, most accurate answer possible. Focus on direct calculations, definitions, or theorems without unnecessary elaboration."
 
@@ -39,13 +25,10 @@ def chat(user_prompt, max_tokens=2200, temperature=0.2):
         {"role": "user", "content": user_prompt}
     ]
 
-    # Apply the chat template to format the messages into a single prompt string
-    # add_generation_prompt=True is crucial for chat models like Qwen to start generating
     formatted_prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
     inputs = tokenizer(formatted_prompt, return_tensors="pt").to(model.device)
 
-    # Generate the response
     output_ids = model.generate(
         **inputs,
         max_new_tokens=max_tokens,
@@ -53,33 +36,13 @@ def chat(user_prompt, max_tokens=2200, temperature=0.2):
         do_sample=True,
         top_p=0.95,
         pad_token_id=tokenizer.eos_token_id,
-        # It's often good practice to set eos_token_id in generate for better termination
         eos_token_id=tokenizer.eos_token_id
     )
 
-    # Decode the generated output, skipping the input part of the prompt
     response = tokenizer.decode(output_ids[0][inputs['input_ids'].shape[-1]:], skip_special_tokens=True)
     return response.strip()
 
 def chat_with_attention(user_prompt, max_tokens=2200, temperature=0.2):
-    """
-    Interacts with the Qwen model, incorporating a system prompt for mathematical,
-    short, and precise answers, and returns attention weights.
-
-    Args:
-        user_prompt (str): The user's input query.
-        max_tokens (int): The maximum number of new tokens to generate for the response.
-                          Reduced for "short and precise" answers.
-        temperature (float): Controls the randomness of the generation. Lower values
-                             make the output more deterministic.
-
-    Returns:
-        tuple: A tuple containing:
-            - str: The model's generated response.
-            - list: A list of attention tensors, one for each layer, for each generated token.
-                    The shape of each tensor typically is (batch_size, num_heads, sequence_length, sequence_length).
-                    Note: The exact structure might vary slightly based on the model's implementation.
-    """
     system_prompt = "You are a highly logical and precise mathematical assistant. When asked a question, provide the shortest, most accurate answer possible. Focus on direct calculations, definitions, or theorems without unnecessary elaboration."
 
     messages = [
@@ -87,14 +50,11 @@ def chat_with_attention(user_prompt, max_tokens=2200, temperature=0.2):
         {"role": "user", "content": user_prompt}
     ]
 
-    # Apply the chat template to format the messages into a single prompt string
-    # add_generation_prompt=True is crucial for chat models like Qwen to start generating
     formatted_prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
-    # Move inputs to the model's device
     inputs = tokenizer(formatted_prompt, return_tensors="pt").to(model.device)
 
-    # Generate the response, requesting attention outputs
+
     output = model.generate(
         **inputs,
         max_new_tokens=max_tokens,
@@ -103,32 +63,18 @@ def chat_with_attention(user_prompt, max_tokens=2200, temperature=0.2):
         top_p=0.95,
         pad_token_id=tokenizer.eos_token_id,
         eos_token_id=tokenizer.eos_token_id,
-        output_attentions=True,           # <--- Crucial: Request attention outputs
-        return_dict_in_generate=True      # <--- Crucial: Return a GenerateOutput object
+        output_attentions=True,           # important for attention
+        return_dict_in_generate=True      # important for attention
     )
 
-    # Decode the generated output, skipping the input part of the prompt
     response = tokenizer.decode(output.sequences[0][inputs['input_ids'].shape[-1]:], skip_special_tokens=True)
-
-    # Access the attentions from the GenerateOutput object
-    # output.attentions will be a tuple of tuples, where each inner tuple corresponds
-    # to the attentions of a single decoder layer for each generated token.
-    # We want to flatten this to a list of attention tensors for easier processing.
     generated_attentions = output.attentions
 
-    # The structure of generated_attentions can be complex.
-    # For causal LMs, it's typically a tuple where each element is a tuple of attention tensors
-    # for all layers at a specific generated token position.
-
-    # Let's process it to get a list of attention tensors for each generated token.
-    # Each element in this list will be a tuple of attention tensors (one for each layer)
-    # for a specific generated token.
-
-    # For a simple list of all attention tensors across all generated tokens and layers:
+    # attention tensors across all generated tokens and layers
     all_attentions_flat = []
     if generated_attentions:
-        for token_attentions in generated_attentions: # Iterate through attentions for each generated token
-            for layer_attention in token_attentions:  # Iterate through attentions for each layer
+        for token_attentions in generated_attentions: # attentions for each generated token
+            for layer_attention in token_attentions:  # attentions for each layer
                 all_attentions_flat.append(layer_attention)
 
     return response.strip(), all_attentions_flat
